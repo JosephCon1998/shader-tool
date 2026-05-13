@@ -15,7 +15,7 @@ function providerHeaders() {
   return h;
 }
 
-export async function generateShader(prompt, currentShader, referenceImage, { onDelta, onDone, onError }) {
+export async function generateShader(prompt, currentShader, referenceImage, { onDelta, onThinking, onDone, onError }) {
   const body = { prompt };
   if (currentShader) body.currentShader = currentShader;
   if (referenceImage) {
@@ -56,9 +56,10 @@ export async function generateShader(prompt, currentShader, referenceImage, { on
       if (!line.startsWith('data: ')) continue;
       try {
         const event = JSON.parse(line.slice(6));
-        if (event.type === 'delta' && onDelta) onDelta(event.text);
-        if (event.type === 'done')             onDone(event.shader, event.explanation);
-        if (event.type === 'error')            onError(event.message);
+        if (event.type === 'thinking' && onThinking) onThinking(event.text);
+        if (event.type === 'delta'   && onDelta)    onDelta(event.text);
+        if (event.type === 'done')                  onDone(event.shader, event.explanation);
+        if (event.type === 'error')                 onError(event.message);
       } catch {
         // malformed line — skip
       }

@@ -19,6 +19,17 @@ function getModelLabel() {
   return PROVIDER_MODEL_LABELS[provider] || provider;
 }
 
+function getApiKey(provider) {
+  return localStorage.getItem('shader-api-key-' + provider)
+      || localStorage.getItem('shader-api-key')
+      || '';
+}
+
+function hasCredential(provider) {
+  if (provider === 'local') return !!localStorage.getItem('shader-local-url');
+  return !!getApiKey(provider);
+}
+
 function providerHeaders() {
   const provider = localStorage.getItem('shader-provider') || 'anthropic';
   const h = { 'Content-Type': 'application/json', 'X-Provider': provider };
@@ -28,11 +39,21 @@ function providerHeaders() {
     if (url)   h['X-Local-URL']   = url;
     if (model) h['X-Local-Model'] = model;
   } else {
-    const key = localStorage.getItem('shader-api-key');
+    const key = getApiKey(provider);
     if (key) h['X-API-Key'] = key;
   }
   return h;
 }
+
+// Migrate legacy single api key to per-provider storage
+(function migrateApiKey() {
+  const legacy = localStorage.getItem('shader-api-key');
+  if (!legacy) return;
+  const provider = localStorage.getItem('shader-provider') || 'anthropic';
+  if (provider !== 'local' && !localStorage.getItem('shader-api-key-' + provider)) {
+    localStorage.setItem('shader-api-key-' + provider, legacy);
+  }
+})();
 
 // ── State ───────────────────────────────────────────────────────────────────
 let renderer;
@@ -44,6 +65,9 @@ let referenceImage = null; // { base64: string, mediaType: string }
 let activeHistoryItem = null;
 let activePresetIndex = null;
 let _saveParamsTimer = null;
+let _historySearchQuery = '';
+const _historyTagFilter = new Set();
+let _historySort = null; // null | 'asc' | 'desc'
 function debounceSaveHistory() {
   clearTimeout(_saveParamsTimer);
   _saveParamsTimer = setTimeout(saveHistory, 400);
@@ -59,6 +83,16 @@ function showSaveIndicator() {
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const canvas          = document.getElementById('shader-canvas');
 const promptInput     = document.getElementById('prompt-input');
+
+{
+  const placeholders = [
+    "Describe your shader… (e.g., 'bloom effect', 'terrain noise', 'CRT scanlines')",
+    "Define your GLSL visual goal… (e.g., 'vertex displacement using heightmap', 'pixelated sprite renderer')",
+    "Describe shader effect or logic… (e.g., 'water reflection', 'raymarching scene')",
+    "What visual behavior do you want? (e.g., 'volumetric fog in fragment shader', 'sine wave distortion')",
+  ];
+  promptInput.placeholder = placeholders[Math.floor(Math.random() * placeholders.length)];
+}
 const generateBtn     = document.getElementById('generate-btn');
 const randomBtn       = document.getElementById('random-btn');
 const pauseBtn        = document.getElementById('pause-btn');
@@ -88,6 +122,12 @@ const explanationEl   = document.getElementById('explanation');
 const streamPreview   = document.getElementById('stream-preview');
 const streamContent   = document.getElementById('stream-content');
 const terminalBadge   = document.getElementById('terminal-badge');
+const thinkingPanel   = document.getElementById('thinking-panel');
+const thinkingToggle  = document.getElementById('thinking-toggle');
+const thinkingContent = document.getElementById('thinking-content');
+const thinkingLabel   = document.getElementById('thinking-label');
+const thinkingArrow   = document.getElementById('thinking-arrow');
+const thinkingSpinner = document.getElementById('thinking-spinner');
 const themeToggle     = document.getElementById('theme-toggle');
 const canvasWrap      = document.getElementById('canvas-wrap');
 const imageBtn        = document.getElementById('image-btn');
@@ -126,11 +166,25 @@ const enhanceShaderSubmit   = document.getElementById('enhance-shader-submit');
 const sweetenersToggle   = document.getElementById('sweeteners-toggle');
 const sweetenersArrow    = document.getElementById('sweeteners-arrow');
 const sweetenersPanel    = document.getElementById('sweeteners-panel');
-const historyToggle      = document.getElementById('history-toggle');
-const historyArrow       = document.getElementById('history-arrow');
+const historyToggle        = document.getElementById('history-toggle');
+const historyArrow         = document.getElementById('history-arrow');
+const historyControls      = document.getElementById('history-controls');
+const historySearch        = document.getElementById('history-search');
+const historySortBtn       = document.getElementById('history-sort-btn');
+const historyTagFilterBtn  = document.getElementById('history-tag-filter-btn');
+const historyTagFilterMenu = document.getElementById('history-tag-filter-menu');
+const historyFilterBadge   = document.getElementById('history-filter-badge');
 const descriptionToggle  = document.getElementById('description-toggle');
 const descriptionArrow   = document.getElementById('description-arrow');
 const descriptionSection = document.getElementById('description-section');
+const leftCollapseBtn       = document.getElementById('left-collapse-btn');
+const mainEl                = document.getElementById('main');
+const promptSectionToggle   = document.getElementById('prompt-section-toggle');
+const leftPanel             = document.getElementById('left-panel');
+const helpBtn            = document.getElementById('help-btn');
+const helpModal          = document.getElementById('help-modal');
+const helpClose          = document.getElementById('help-close');
+const providerSwitcher   = document.getElementById('provider-switcher');
 
 // ── Monaco init ──────────────────────────────────────────────────────────────
 monacoEditor = await window._monacoReady;
@@ -308,12 +362,35 @@ renderer.onCompileSuccess = () => {
   setStatus('Compiled successfully');
 };
 
+function renameParamInShader(src, uniformName, newLabel) {
+  return src.split('\n').map(line => {
+    if (!new RegExp(`uniform\\s+\\S+\\s+${uniformName}\\s*;`).test(line)) return line;
+    if (/label:"[^"]*"/.test(line)) {
+      return line.replace(/label:"[^"]*"/, `label:"${newLabel}"`);
+    }
+    if (/\/\/\s*@param/.test(line)) {
+      return line.replace(/(\/\/\s*@param\s*)/, `$1label:"${newLabel}" `);
+    }
+    return line;
+  }).join('\n');
+}
+
 const controls = new ControlsPanel(userParams, (name, value) => {
   renderer.setUniform(name, value);
   if (activeHistoryItem) {
     activeHistoryItem.params = activeHistoryItem.params || {};
     activeHistoryItem.params[name] = value;
     debounceSaveHistory();
+  }
+}, (uniformName, newLabel) => {
+  const src = monacoEditor.getValue();
+  const updated = renameParamInShader(src, uniformName, newLabel);
+  monacoEditor.setValue(updated);
+  const err = renderer.compile(updated);
+  if (!err) {
+    currentShader = updated;
+    if (activeHistoryItem) { activeHistoryItem.shader = updated; saveHistory(); }
+    controls.rebuild(extractUniforms(updated), controls.getValues());
   }
 });
 
@@ -374,6 +451,23 @@ try {
   }
 } catch (_) {}
 
+// ── Showcase import ───────────────────────────────────────────────────────────
+try {
+  const imported = localStorage.getItem('shader-showcase-import');
+  if (imported) {
+    localStorage.removeItem('shader-showcase-import');
+    const err = renderer.compile(imported);
+    if (!err) {
+      currentShader = imported;
+      monacoEditor.setValue(imported);
+      renderer.resetTime();
+      const uniforms = extractUniforms(imported);
+      controls.rebuild(uniforms);
+      setStatus('Shader imported from Showcase — ' + uniforms.length + ' parameter(s)');
+    }
+  }
+} catch (_) {}
+
 // ── Load persisted theme ──────────────────────────────────────────────────────
 (function applyTheme() {
   const saved = localStorage.getItem('shader-theme') || 'dark';
@@ -399,15 +493,36 @@ async function doGenerate() {
   explanationEl.textContent = '';
   descriptionSection.hidden = true;
 
+  // Reset thinking panel
+  thinkingPanel.hidden = true;
+  thinkingContent.hidden = false;
+  thinkingContent.textContent = '';
+  thinkingLabel.textContent = 'Thinking…';
+  thinkingSpinner.hidden = false;
+  thinkingArrow.classList.add('open');
+
   let streamBuf = '';
+  let thinkingBuf = '';
 
   await generateShader(prompt, currentShader, referenceImage, {
+    onThinking(text) {
+      thinkingBuf += text;
+      thinkingPanel.hidden = false;
+      thinkingContent.textContent = thinkingBuf;
+      thinkingContent.scrollTop = thinkingContent.scrollHeight;
+    },
     onDelta(text) {
       streamBuf += text;
       streamContent.innerHTML = glslHighlight(streamBuf.slice(-800)) + '<span class="t-cursor"></span>';
       streamContent.scrollTop = streamContent.scrollHeight;
     },
     async onDone(shader, explanation) {
+      if (thinkingBuf) {
+        thinkingLabel.textContent = 'Thought';
+        thinkingSpinner.hidden = true;
+        thinkingContent.hidden = true;
+        thinkingArrow.classList.remove('open');
+      }
       streamPreview.style.display = 'none';
       streamContent.innerHTML = '';
 
@@ -450,6 +565,12 @@ async function doGenerate() {
       finish();
     },
     onError(msg) {
+      if (thinkingBuf) {
+        thinkingLabel.textContent = 'Thought';
+        thinkingSpinner.hidden = true;
+        thinkingContent.hidden = true;
+        thinkingArrow.classList.remove('open');
+      }
       streamPreview.style.display = 'none';
       streamContent.innerHTML = '';
       showError(msg);
@@ -570,13 +691,49 @@ const SWEETENERS = {
 
   const historyOpen = localStorage.getItem('shader-history-open') !== 'false';
   historyList.hidden = !historyOpen;
+  historyControls.hidden = !historyOpen;
   historyArrow.classList.toggle('open', historyOpen);
 
   historyToggle.addEventListener('click', () => {
     const isHidden = historyList.hidden;
     historyList.hidden = !isHidden;
+    historyControls.hidden = !isHidden;
     historyArrow.classList.toggle('open', isHidden);
     localStorage.setItem('shader-history-open', isHidden ? 'true' : 'false');
+  });
+
+  historySearch.addEventListener('input', () => {
+    _historySearchQuery = historySearch.value.trim();
+    renderHistory();
+  });
+
+  historySortBtn.addEventListener('click', () => {
+    if (_historySort === null)       _historySort = 'asc';
+    else if (_historySort === 'asc') _historySort = 'desc';
+    else                             _historySort = null;
+    const icons = { null: 'mingcute:az-sort-ascending-letters-line', asc: 'mingcute:az-sort-ascending-letters-line', desc: 'mingcute:za-sort-descending-letters-line' };
+    const titles = { null: 'Sort A→Z', asc: 'Sort A→Z', desc: 'Sort Z→A' };
+    historySortBtn.innerHTML = `<iconify-icon icon="${icons[_historySort]}" width="14" height="14"></iconify-icon>`;
+    historySortBtn.title = titles[_historySort];
+    historySortBtn.classList.toggle('active', _historySort !== null);
+    renderHistory();
+  });
+
+  historyTagFilterBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isHidden = historyTagFilterMenu.hidden;
+    historyTagFilterMenu.hidden = !isHidden;
+    if (!isHidden) return;
+    renderTagFilterMenu();
+  });
+
+  document.addEventListener('click', () => { historyTagFilterMenu.hidden = true; });
+  historyTagFilterMenu.addEventListener('click', (e) => e.stopPropagation());
+
+  thinkingToggle.addEventListener('click', () => {
+    const hidden = thinkingContent.hidden;
+    thinkingContent.hidden = !hidden;
+    thinkingArrow.classList.toggle('open', hidden);
   });
 
   const descOpen = localStorage.getItem('shader-description-open') !== 'false';
@@ -610,6 +767,15 @@ randomBtn.addEventListener('click', async () => {
   if (generating) return;
   randomBtn.innerHTML = '<iconify-icon icon="mingcute:loading-3-line" width="18" height="18" class="spin"></iconify-icon>';
   randomBtn.disabled = true;
+
+  // Reset thinking panel to loading state
+  thinkingPanel.hidden = true;
+  thinkingContent.hidden = false;
+  thinkingContent.textContent = '';
+  thinkingLabel.textContent = 'Thinking…';
+  thinkingSpinner.hidden = false;
+  thinkingArrow.classList.add('open');
+
   try {
     const recentPrompts = getRecentPrompts();
     const res = await fetch('/api/random-prompt', {
@@ -617,8 +783,18 @@ randomBtn.addEventListener('click', async () => {
       headers: providerHeaders(),
       body: JSON.stringify({ recentPrompts }),
     });
-    const { prompt, error } = await res.json();
+    const { prompt, reasoning, error } = await res.json();
     if (error) { showError(error); return; }
+
+    if (reasoning) {
+      thinkingContent.textContent = reasoning;
+      thinkingPanel.hidden = false;
+      thinkingLabel.textContent = 'Thought';
+      thinkingSpinner.hidden = true;
+      thinkingContent.hidden = true;
+      thinkingArrow.classList.remove('open');
+    }
+
     pushRecentPrompt(prompt);
     promptInput.value = prompt;
     promptInput.focus();
@@ -947,7 +1123,7 @@ function saveHistory() {
 }
 
 function addHistory(prompt) {
-  history.unshift({ prompt, shader: currentShader, name: null, params: {}, presets: [] });
+  history.unshift({ prompt, shader: currentShader, name: null, params: {}, presets: [], tags: [] });
   if (history.length > 20) history.pop();
   activeHistoryItem = history[0];
   activePresetIndex = null;
@@ -956,38 +1132,134 @@ function addHistory(prompt) {
   renderPresets();
 }
 
+function getAllTags() {
+  const s = new Set();
+  for (const item of history) for (const t of (item.tags || [])) s.add(t);
+  return [...s].sort();
+}
+
+function renderTagFilterMenu() {
+  const tags = getAllTags();
+  historyTagFilterMenu.innerHTML = '';
+  if (!tags.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tag-filter-empty';
+    empty.textContent = 'No tags yet';
+    historyTagFilterMenu.appendChild(empty);
+  } else {
+    for (const tag of tags) {
+      const row = document.createElement('label');
+      row.className = 'tag-filter-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = _historyTagFilter.has(tag);
+      cb.addEventListener('change', () => {
+        if (cb.checked) _historyTagFilter.add(tag);
+        else _historyTagFilter.delete(tag);
+        updateFilterBadge();
+        renderHistory();
+      });
+      row.appendChild(cb);
+      row.appendChild(document.createTextNode(tag));
+      historyTagFilterMenu.appendChild(row);
+    }
+  }
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'tag-filter-clear';
+  clearBtn.textContent = 'Clear filters';
+  clearBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _historyTagFilter.clear();
+    updateFilterBadge();
+    renderHistory();
+    renderTagFilterMenu();
+  });
+  historyTagFilterMenu.appendChild(clearBtn);
+}
+
+function updateFilterBadge() {
+  const n = _historyTagFilter.size;
+  historyFilterBadge.hidden = n === 0;
+  historyFilterBadge.textContent = n;
+}
+
+function _startTagInput(tagsRow, item) {
+  const existing = tagsRow.querySelector('.history-tag-input');
+  if (existing) { existing.focus(); return; }
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'history-tag-input';
+  input.placeholder = 'tag…';
+  input.maxLength = 24;
+  const addBtn = tagsRow.querySelector('.history-tag-add');
+  tagsRow.insertBefore(input, addBtn);
+  input.focus();
+  let settled = false;
+  const commit = () => {
+    if (settled) return;
+    settled = true;
+    const val = input.value.trim().toLowerCase().replace(/\s+/g, '-');
+    if (val && !(item.tags || []).includes(val)) {
+      item.tags = item.tags || [];
+      item.tags.push(val);
+      saveHistory();
+    }
+    renderHistory();
+  };
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    renderHistory();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    e.stopPropagation();
+  });
+  input.addEventListener('blur', cancel);
+  input.addEventListener('click', (e) => e.stopPropagation());
+}
+
 function renderHistory() {
+  const q = _historySearchQuery.toLowerCase();
+  const filtered = history.filter(item => {
+    if (q) {
+      const name = (item.name || item.prompt).toLowerCase();
+      if (!name.includes(q)) return false;
+    }
+    if (_historyTagFilter.size) {
+      const itemTags = item.tags || [];
+      for (const t of _historyTagFilter) if (!itemTags.includes(t)) return false;
+    }
+    return true;
+  });
+
+  if (_historySort) {
+    filtered.sort((a, b) => {
+      const na = (a.name || a.prompt).toLowerCase();
+      const nb = (b.name || b.prompt).toLowerCase();
+      return _historySort === 'asc' ? na.localeCompare(nb) : nb.localeCompare(na);
+    });
+  }
+
   document.getElementById('history-count').textContent = history.length ? `(${history.length})` : '';
   historyList.innerHTML = '';
-  for (let i = 0; i < history.length; i++) {
-    const item = history[i];
+
+  for (let fi = 0; fi < filtered.length; fi++) {
+    const item = filtered[fi];
+    const i = history.indexOf(item);
     const li = document.createElement('li');
-    li.className = 'history-item';
+    li.className = 'history-item' + (activeHistoryItem === item ? ' active' : '');
+
+    // ── Name column ──────────────────────────────────────────────────────────
+    const nameCol = document.createElement('div');
+    nameCol.className = 'history-item-name';
 
     const displayName = item.name || (item.prompt.slice(0, 60) + (item.prompt.length > 60 ? '…' : ''));
     const span = document.createElement('span');
     span.className = 'history-label';
     span.textContent = displayName;
-    li.appendChild(span);
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'history-save-btn';
-    saveBtn.title = 'Save current state';
-    saveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="3.5" y="1.5" width="3.5" height="2.5" stroke="currentColor" stroke-width="1.1"/><rect x="2.5" y="6" width="7" height="4" rx="0.5" stroke="currentColor" stroke-width="1.1"/></svg>';
-    saveBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      item.shader = monacoEditor.getValue();
-      item.params = controls.getValues();
-      saveHistory();
-      showSaveIndicator();
-      saveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 6.5l2.5 2.5 5.5-5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      saveBtn.style.color = 'var(--green)';
-      setTimeout(() => {
-        saveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="3.5" y="1.5" width="3.5" height="2.5" stroke="currentColor" stroke-width="1.1"/><rect x="2.5" y="6" width="7" height="4" rx="0.5" stroke="currentColor" stroke-width="1.1"/></svg>';
-        saveBtn.style.color = '';
-      }, 1200);
-    });
-    li.appendChild(saveBtn);
+    nameCol.appendChild(span);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'history-delete-btn';
@@ -995,15 +1267,51 @@ function renderHistory() {
     deleteBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 3h8M5 3V2h2v1M4.5 3v6M7.5 3v6M3 3l.5 7h5l.5-7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     deleteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const label = item.name || item.prompt.slice(0, 40) + (item.prompt.length > 40 ? '…' : '');
+      const label = item.name || item.prompt.slice(0, 40) + '…';
       if (!confirm(`Delete "${label}"?`)) return;
       if (activeHistoryItem === item) activeHistoryItem = null;
       history.splice(i, 1);
       saveHistory();
       renderHistory();
     });
-    li.appendChild(deleteBtn);
+    nameCol.appendChild(deleteBtn);
+    li.appendChild(nameCol);
 
+    // ── Tags column ──────────────────────────────────────────────────────────
+    const tagsCol = document.createElement('div');
+    tagsCol.className = 'history-item-tags';
+
+    for (const tag of (item.tags || [])) {
+      const chip = document.createElement('span');
+      chip.className = 'history-tag-chip';
+      chip.textContent = tag;
+      chip.addEventListener('click', (e) => e.stopPropagation());
+      const del = document.createElement('button');
+      del.className = 'history-tag-chip-del';
+      del.textContent = '×';
+      del.title = 'Remove tag';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        item.tags = item.tags.filter(t => t !== tag);
+        saveHistory();
+        renderHistory();
+      });
+      chip.appendChild(del);
+      tagsCol.appendChild(chip);
+    }
+
+    const addTagBtn = document.createElement('button');
+    addTagBtn.className = 'history-tag-add';
+    addTagBtn.textContent = '+';
+    addTagBtn.title = 'Add tag';
+    addTagBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _startTagInput(tagsCol, item);
+    });
+    tagsCol.appendChild(addTagBtn);
+    li.appendChild(tagsCol);
+
+    // ── Interactions ─────────────────────────────────────────────────────────
     li.addEventListener('click', () => {
       promptInput.value = item.prompt;
       if (item.shader) {
@@ -1017,47 +1325,46 @@ function renderHistory() {
         controls.rebuild(uniforms, item.params || {});
         pushUndoState(item.shader, controls.getValues());
         renderPresets();
+        document.querySelectorAll('.history-item.active').forEach(el => el.classList.remove('active'));
+        li.classList.add('active');
       }
     });
 
-    li.addEventListener('dblclick', (e) => {
+    nameCol.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'history-rename-input';
       input.value = item.name || item.prompt;
-      li.replaceChild(input, span);
+      nameCol.replaceChild(input, span);
       input.select();
-
       let settled = false;
-
-      function commit() {
+      const commit = () => {
         if (settled) return;
         settled = true;
         const val = input.value.trim();
         item.name = val || null;
         saveHistory();
         renderHistory();
-      }
-
-      function cancel() {
+      };
+      const cancel = () => {
         if (settled) return;
         settled = true;
         renderHistory();
-      }
-
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); commit(); }
-        if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-        e.stopPropagation();
+      };
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter')  { ev.preventDefault(); commit(); }
+        if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+        ev.stopPropagation();
       });
-
       input.addEventListener('blur', cancel);
-      input.addEventListener('click', (e) => e.stopPropagation());
+      input.addEventListener('click', (ev) => ev.stopPropagation());
     });
 
     historyList.appendChild(li);
   }
+
+  renderTagFilterMenu();
 }
 
 // ── Theme toggle ──────────────────────────────────────────────────────────────
@@ -1422,6 +1729,23 @@ leftResizeHandle.addEventListener('mousedown', (e) => {
   document.addEventListener('mouseup', onUp);
 });
 
+// ── Left panel collapse toggle (horizontal) ──────────────────────────────────
+leftCollapseBtn.addEventListener('click', () => {
+  const collapsed = mainEl.classList.toggle('left-collapsed');
+  localStorage.setItem('shader-left-collapsed', collapsed ? '1' : '0');
+  monacoEditor?.layout();
+});
+
+// ── Prompt section collapse (vertical, within left panel) ────────────────────
+if (localStorage.getItem('shader-prompt-collapsed') === '1') {
+  leftPanel.classList.add('prompt-collapsed');
+}
+
+promptSectionToggle.addEventListener('click', () => {
+  const collapsed = leftPanel.classList.toggle('prompt-collapsed');
+  localStorage.setItem('shader-prompt-collapsed', collapsed ? '1' : '0');
+});
+
 // ── Right panel resize (drag left edge of right panel) ───────────────────────
 rightResizeHandle.addEventListener('mousedown', (e) => {
   e.preventDefault();
@@ -1675,16 +1999,16 @@ const fontSizeLabel       = document.getElementById('font-size-label');
 const settingAccentColor  = document.getElementById('setting-accent-color');
 const accentPresetsEl     = document.getElementById('accent-presets');
 const settingsTabs          = document.querySelectorAll('.settings-tab');
-const settingProvider       = document.getElementById('setting-provider');
-const settingApiKey         = document.getElementById('setting-api-key');
-const settingApiKeySave     = document.getElementById('setting-api-key-save');
-const settingsApikeyRow     = document.getElementById('settings-apikey-row');
-const settingLocalUrl       = document.getElementById('setting-local-url');
-const settingLocalUrlSave   = document.getElementById('setting-local-url-save');
-const settingsLocalUrlRow   = document.getElementById('settings-local-url-row');
-const settingLocalModel     = document.getElementById('setting-local-model');
-const settingLocalModelSave = document.getElementById('setting-local-model-save');
-const settingsLocalModelRow = document.getElementById('settings-local-model-row');
+const settingKeyAnthropicInput = document.getElementById('setting-api-key-anthropic');
+const settingKeyAnthropicSave  = document.getElementById('setting-api-key-anthropic-save');
+const settingKeyOpenaiInput    = document.getElementById('setting-api-key-openai');
+const settingKeyOpenaiSave     = document.getElementById('setting-api-key-openai-save');
+const settingKeyGeminiInput    = document.getElementById('setting-api-key-gemini');
+const settingKeyGeminiSave     = document.getElementById('setting-api-key-gemini-save');
+const settingLocalUrl          = document.getElementById('setting-local-url');
+const settingLocalUrlSave      = document.getElementById('setting-local-url-save');
+const settingLocalModel        = document.getElementById('setting-local-model');
+const settingLocalModelSave    = document.getElementById('setting-local-model-save');
 
 function hexToHsl(hex) {
   let r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
@@ -1766,18 +2090,18 @@ function loadSettings() {
   fontSizeLabel.textContent = fontSize + ' px';
   if (monacoEditor) monacoEditor.updateOptions({ fontSize });
 
-  const provider = localStorage.getItem('shader-provider') || 'anthropic';
-  settingProvider.value = provider;
-  syncProviderRows(provider);
-
-  const storedKey = localStorage.getItem('shader-api-key') || '';
-  settingApiKey.value = storedKey ? storedKey.slice(0, 8) + '…' : '';
+  function maskKey(k) { return k ? k.slice(0, 8) + '…' : ''; }
+  settingKeyAnthropicInput.value = maskKey(getApiKey('anthropic'));
+  settingKeyOpenaiInput.value    = maskKey(getApiKey('openai'));
+  settingKeyGeminiInput.value    = maskKey(getApiKey('gemini'));
 
   const storedUrl = localStorage.getItem('shader-local-url') || '';
   settingLocalUrl.value = storedUrl || 'http://localhost:1234/v1';
 
   const storedModel = localStorage.getItem('shader-local-model') || '';
   settingLocalModel.value = storedModel;
+
+  syncProviderSwitcher();
 }
 
 loadSettings();
@@ -1860,38 +2184,63 @@ settingFontSize.addEventListener('input', () => {
   if (monacoEditor) monacoEditor.updateOptions({ fontSize: size });
 });
 
-function syncProviderRows(provider) {
-  const isLocal = provider === 'local';
-  settingsApikeyRow.style.display    = isLocal ? 'none' : '';
-  settingsLocalUrlRow.style.display  = isLocal ? '' : 'none';
-  settingsLocalModelRow.style.display= isLocal ? '' : 'none';
+// ── Provider switcher ────────────────────────────────────────────────────────
+const PROVIDER_LABELS = { anthropic: 'Anthropic Claude', openai: 'OpenAI GPT-4o', gemini: 'Google Gemini', local: 'Local model' };
+
+function syncProviderSwitcher() {
+  const active = localStorage.getItem('shader-provider') || 'anthropic';
+  providerSwitcher.querySelectorAll('.provider-btn').forEach(btn => {
+    const p = btn.dataset.provider;
+    const configured = hasCredential(p);
+    btn.hidden = !configured;
+    btn.classList.toggle('provider-btn--active', p === active);
+  });
 }
 
-settingProvider.addEventListener('change', () => {
-  const provider = settingProvider.value;
+providerSwitcher.addEventListener('click', e => {
+  const btn = e.target.closest('.provider-btn');
+  if (!btn) return;
+  const provider = btn.dataset.provider;
   localStorage.setItem('shader-provider', provider);
-  syncProviderRows(provider);
-  setStatus('Provider changed to ' + settingProvider.options[settingProvider.selectedIndex].text);
+  syncProviderSwitcher();
+  setStatus('Using ' + PROVIDER_LABELS[provider]);
 });
 
-function saveApiKey() {
-  const raw = settingApiKey.value.trim();
-  if (!raw || raw.endsWith('…')) return;
-  localStorage.setItem('shader-api-key', raw);
-  settingApiKey.value = raw.slice(0, 8) + '…';
-  setStatus('API key saved');
+// ── Per-provider key saves ────────────────────────────────────────────────────
+function makeKeySaver(provider, inputEl) {
+  return function save() {
+    const raw = inputEl.value.trim();
+    if (!raw || raw.endsWith('…')) return;
+    localStorage.setItem('shader-api-key-' + provider, raw);
+    inputEl.value = raw.slice(0, 8) + '…';
+    syncProviderSwitcher();
+    setStatus(provider.charAt(0).toUpperCase() + provider.slice(1) + ' key saved');
+  };
 }
-settingApiKeySave.addEventListener('click', saveApiKey);
-settingApiKey.addEventListener('keydown', e => { if (e.key === 'Enter') saveApiKey(); });
-settingApiKey.addEventListener('focus', () => {
-  const stored = localStorage.getItem('shader-api-key');
-  if (stored) settingApiKey.value = stored;
+
+function makeKeyFocusHandler(provider, inputEl) {
+  return function() {
+    const stored = getApiKey(provider);
+    if (stored) inputEl.value = stored;
+  };
+}
+
+[
+  ['anthropic', settingKeyAnthropicInput, settingKeyAnthropicSave],
+  ['openai',    settingKeyOpenaiInput,    settingKeyOpenaiSave],
+  ['gemini',    settingKeyGeminiInput,    settingKeyGeminiSave],
+].forEach(([provider, input, saveBtn]) => {
+  const save = makeKeySaver(provider, input);
+  saveBtn.addEventListener('click', save);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+  input.addEventListener('focus', makeKeyFocusHandler(provider, input));
 });
 
 function saveLocalUrl() {
   const raw = settingLocalUrl.value.trim();
   if (!raw) return;
   localStorage.setItem('shader-local-url', raw);
+  syncProviderSwitcher();
   setStatus('Server URL saved');
 }
 settingLocalUrlSave.addEventListener('click', saveLocalUrl);
@@ -1905,3 +2254,8 @@ function saveLocalModel() {
 }
 settingLocalModelSave.addEventListener('click', saveLocalModel);
 settingLocalModel.addEventListener('keydown', e => { if (e.key === 'Enter') saveLocalModel(); });
+
+// ── Help modal ────────────────────────────────────────────────────────────────
+helpBtn.addEventListener('click', () => helpModal.classList.add('open'));
+helpClose.addEventListener('click', () => helpModal.classList.remove('open'));
+helpModal.addEventListener('click', e => { if (e.target === helpModal) helpModal.classList.remove('open'); });

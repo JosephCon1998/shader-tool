@@ -1,10 +1,10 @@
+import Anthropic from '@anthropic-ai/sdk';
+import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
-import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -187,24 +187,41 @@ app.post('/api/generate', async (req, res) => {
       : textPrompt;
 
     try {
-      const stream = await openaiClient(apiKey, baseURL).chat.completions.create({
+      const stream = openaiClient(apiKey, baseURL).chat.completions.stream({
         model,
         max_tokens: 4096,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userContent },
         ],
-        stream: true,
       });
 
       let fullText = '';
+      let thinkingStreamed = '';
       for await (const chunk of stream) {
+        // Incremental reasoning (models that stream thinking token-by-token)
+        const thinkingDelta = chunk.choices[0]?.delta?.reasoning_content;
+        if (thinkingDelta) {
+          thinkingStreamed += thinkingDelta;
+          res.write(`data: ${JSON.stringify({ type: 'thinking', text: thinkingDelta })}\n\n`);
+        }
         const delta = chunk.choices[0]?.delta?.content || '';
         if (delta) {
           fullText += delta;
           res.write(`data: ${JSON.stringify({ type: 'delta', text: delta })}\n\n`);
         }
       }
+
+      // Fallback: some servers (e.g. LM Studio) only populate reasoning_content
+      // on the final assembled message rather than in individual delta chunks.
+      if (!thinkingStreamed) {
+        const finalMsg = await stream.finalMessage();
+        const reasoning = finalMsg.choices?.[0]?.message?.reasoning_content;
+        if (reasoning) {
+          res.write(`data: ${JSON.stringify({ type: 'thinking', text: reasoning })}\n\n`);
+        }
+      }
+
       const { shader, explanation } = extractShader(fullText);
       res.write(`data: ${JSON.stringify({ type: 'done', shader, explanation })}\n\n`);
       res.end();
@@ -227,7 +244,7 @@ async function callAI(req, systemPrompt, userPrompt, maxTokens = 4096) {
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
-    return msg.content[0].text;
+    return { text: msg.content[0].text, reasoning: null };
   } else {
     const msg = await openaiClient(apiKey, baseURL).chat.completions.create({
       model,
@@ -237,7 +254,11 @@ async function callAI(req, systemPrompt, userPrompt, maxTokens = 4096) {
         { role: 'user', content: userPrompt },
       ],
     });
-    return msg.choices[0].message.content;
+    const msg0 = msg.choices[0].message;
+    return {
+      text: msg0.content || msg0.reasoning_content || '',
+      reasoning: msg0.content ? (msg0.reasoning_content || null) : null,
+    };
   }
 }
 
@@ -273,8 +294,9 @@ app.post('/api/random-prompt', async (req, res) => {
       ? ` Avoid anything resembling:\n${recentPrompts.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
       : '';
     const userMsg = `Give me a random shader prompt.${avoidClause}\n\n${seed}`;
-    const prompt = (await callAI(req, RANDOM_PROMPT_SYSTEM, userMsg, 300)).trim();
-    res.json({ prompt });
+    const { text, reasoning } = await callAI(req, RANDOM_PROMPT_SYSTEM, userMsg, 4096);
+    const prompt = text.trim();
+    res.json({ prompt, reasoning });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -290,8 +312,8 @@ app.post('/api/enhance-prompt', async (req, res) => {
     return res.status(401).json({ error: 'No API key provided. Add one in Settings.' });
   }
   try {
-    const enhanced = (await callAI(req, ENHANCE_PROMPT_SYSTEM, prompt, 400)).trim();
-    res.json({ prompt: enhanced });
+    const { text: enhanced } = await callAI(req, ENHANCE_PROMPT_SYSTEM, prompt, 400);
+    res.json({ prompt: enhanced.trim() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -317,7 +339,7 @@ Rules:
 5. Output only the updated shader inside a \`\`\`glsl fence — no explanation before the fence.`;
 
   try {
-    const full = await callAI(req, SYSTEM_PROMPT, `${prompt}\n\nCurrent shader:\n\`\`\`glsl\n${currentShader}\n\`\`\``);
+    const { text: full } = await callAI(req, SYSTEM_PROMPT, `${prompt}\n\nCurrent shader:\n\`\`\`glsl\n${currentShader}\n\`\`\``);
     const { shader, explanation } = extractShader(full);
     res.json({ shader, explanation });
   } catch (err) {
@@ -339,7 +361,7 @@ app.post('/api/remove-params', async (req, res) => {
   const prompt = `Remove the following uniforms from the GLSL shader and all references to them in the code. Preserve the overall visual intent — replace each removed uniform with a reasonable hardcoded constant so the shader still compiles and looks good.\n\nUniforms to remove:\n${list}\n\nOutput only the updated shader inside a \`\`\`glsl fence — nothing before it.`;
 
   try {
-    const full = await callAI(req, SYSTEM_PROMPT, `${prompt}\n\nCurrent shader:\n\`\`\`glsl\n${currentShader}\n\`\`\``);
+    const { text: full } = await callAI(req, SYSTEM_PROMPT, `${prompt}\n\nCurrent shader:\n\`\`\`glsl\n${currentShader}\n\`\`\``);
     const { shader, explanation } = extractShader(full);
     res.json({ shader, explanation });
   } catch (err) {
@@ -353,6 +375,10 @@ app.get('/app', (req, res) => {
 
 app.get('/learn', (req, res) => {
   res.sendFile(join(__dirname, 'public', 'learn.html'));
+});
+
+app.get('/showcase', (req, res) => {
+  res.sendFile(join(__dirname, 'public', 'showcase.html'));
 });
 
 app.listen(port, () => {

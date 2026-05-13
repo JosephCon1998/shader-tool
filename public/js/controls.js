@@ -22,9 +22,10 @@ function fromHex(hex) {
 }
 
 export class ControlsPanel {
-  constructor(container, onUniformChange) {
+  constructor(container, onUniformChange, onRenameParam) {
     this.container = container;
     this.onChange = onUniformChange;
+    this.onRenameParam = onRenameParam || null;
     this.descriptors = [];
     this.values = {};
     this._animations = {};
@@ -88,6 +89,42 @@ export class ControlsPanel {
     const labelEl = document.createElement('label');
     labelEl.className = 'control-label';
     labelEl.textContent = d.label;
+    if (this.onRenameParam) {
+      labelEl.title = 'Double-click to rename';
+      labelEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'control-label-input';
+        input.value = d.label;
+        wrap.replaceChild(input, labelEl);
+        input.select();
+        let settled = false;
+        const commit = () => {
+          if (settled) return;
+          settled = true;
+          const val = input.value.trim();
+          if (val && val !== d.label) {
+            this.onRenameParam(d.name, val);
+          } else {
+            wrap.replaceChild(labelEl, input);
+          }
+        };
+        const cancel = () => {
+          if (settled) return;
+          settled = true;
+          wrap.replaceChild(labelEl, input);
+        };
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter')  { ev.preventDefault(); commit(); }
+          if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+          ev.stopPropagation();
+        });
+        input.addEventListener('blur', commit);
+        input.addEventListener('click', (ev) => ev.stopPropagation());
+        input.focus();
+      });
+    }
     wrap.appendChild(labelEl);
 
     if (d.type === 'float' || d.type === 'int') {
