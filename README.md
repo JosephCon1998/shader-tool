@@ -2,9 +2,8 @@
 
 # shader-tool
 
-An AI-powered GLSL fragment shader editor with real-time WebGL2 preview,
-interactive parameter controls, and one-click export to React, Svelte, Vanilla
-JS, or raw GLSL.
+A GLSL fragment AI shader editor with real-time WebGL2 preview, interactive
+parameter controls, and export to React, Svelte, Vanilla JS, or raw GLSL.
 
 ---
 
@@ -14,10 +13,10 @@ JS, or raw GLSL.
   anxious" and watch it materialize in real time
 - 🤖 **Multiple AI providers** — Anthropic, OpenAI, Gemini, or your local model
   (LM Studio, Ollama) — use whatever GPU god you prefer
-- ⚡ **Real-time WebGL2 preview** — the shader compiles and runs *as the AI is
-  still writing it*
-- 🔧 **Auto-fix** — when a shader breaks, it automatically gets sent back to the AI
-  with a "hey, you broke it" note; usually comes back fixed
+- ⚡ **Real-time WebGL2 preview** — the shader compiles and runs _as the AI is
+  still writing it_
+- 🔧 **Auto-fix** — when a shader breaks, it automatically gets sent back to the
+  AI with a "hey, you broke it" note; usually comes back fixed
 - 🎛️ **Interactive parameter controls** — sliders, color pickers, toggles, and
   vector inputs that actually do something, powered by `@param` annotations
 - 🎬 **Parameter animation** — hit the play button on any slider and watch it
@@ -26,21 +25,22 @@ JS, or raw GLSL.
   ideas when you're staring at a blank prompt box
 - 💬 **Prompt enhancement** — AI rewrites your vague idea into something
   surprisingly vivid before sending it off
-- 📝 **Monaco editor** — the VS Code editor, but for your shaders, with full GLSL
-  syntax highlighting and auto-compile on save
+- 📝 **Monaco editor** — the VS Code editor, but for your shaders, with full
+  GLSL syntax highlighting and auto-compile on save
 - 🕰️ **History** — last 20 shaders saved across sessions, searchable, taggable,
   and renameable so you can find "the good one"
-- 💾 **Presets** — save and switch between named parameter configurations without
-  touching the code
+- 💾 **Presets** — save and switch between named parameter configurations
+  without touching the code
 - ↩️ **Undo / redo** — 50-step state stack (Cmd/Ctrl+Z), because you will
   absolutely need it
-- 📦 **Export** — GLSL · Vanilla JS · React · Svelte — drop it into whatever you're
-  building
+- 📦 **Export** — GLSL · Vanilla JS · React · Svelte — drop it into whatever
+  you're building
 - 🔄 **Shader adapter** — paste in a shader from Shadertoy or wherever; it gets
   converted to the app's conventions automatically
-- 🖼️ **Showcase** — a gallery of example shaders you can one-click import and remix
-- 🔭 **Fullscreen mode** and resolution quality presets for when you want to stare
-  at it like art
+- 🖼️ **Showcase** — a gallery of example shaders you can one-click import and
+  remix
+- 🔭 **Fullscreen mode** and resolution quality presets for when you want to
+  stare at it like art
 - 🌗 **Dark / light theme** with a customizable accent color, because of course
 
 ---
