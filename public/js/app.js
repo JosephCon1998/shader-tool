@@ -898,6 +898,11 @@ async function doEnhanceShader() {
       const uniforms = extractUniforms(shader);
       controls.rebuild(uniforms);
       pushUndoState(shader, controls.getValues());
+      if (activeHistoryItem) {
+        activeHistoryItem.shader = shader;
+        activeHistoryItem.params = controls.getValues();
+        saveHistory();
+      }
       setStatus('Shader enhanced — ' + uniforms.length + ' parameter(s)');
       finishEnhanceShader();
     },
