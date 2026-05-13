@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shader Tool</title>
+  <script>
+    (function(){
+      var p = localStorage.getItem('shader-provider') ||
+              (localStorage.getItem('shader-api-key') ? 'anthropic' : null);
+      if (!p) { window.location.replace('/'); return; }
+      if (p === 'local') { if (!localStorage.getItem('shader-local-url')) window.location.replace('/'); }
+      else               { if (!localStorage.getItem('shader-api-key'))   window.location.replace('/'); }
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/style.css" />
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+  <!-- Prism syntax highlighting (export modal only) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Topbar ──────────────────────────────────────────────────────────── -->
+  <header id="topbar">
+    <a id="logo" href="/">Shader<span>Tool</span></a>
+    <nav class="topbar-nav">
+      <a class="nav-link nav-link--active" href="/app">Editor</a>
+      <a class="nav-link" href="/learn">Learn</a>
+    </nav>
+    <div id="status-bar">Ready</div>
+    <div class="topbar-actions">
+      <span id="save-indicator">Changes saved.</span>
+      <!-- Theme toggle -->
+      <button class="btn btn-ghost btn-icon" id="theme-toggle" title="Toggle light/dark mode"><iconify-icon icon="mingcute:moon-line" width="18" height="18"></iconify-icon></button>
+      <!-- Settings -->
+      <button class="btn btn-ghost btn-icon" id="settings-btn" title="Settings"><iconify-icon icon="mingcute:settings-3-line" width="18" height="18"></iconify-icon></button>
+      <!-- Export dropdown -->
+      <div class="dropdown" id="export-dropdown">
+        <button class="btn btn-secondary" id="export-btn">Export <iconify-icon icon="mingcute:down-fill" width="14" height="14" style="vertical-align:middle"></iconify-icon></button>
+        <div class="dropdown-menu" id="export-menu">
+          <div class="dropdown-item" data-export="glsl">
+            <span class="item-icon"><iconify-icon icon="mingcute:code-line" width="16" height="16"></iconify-icon></span>
+            <span class="item-label">Raw GLSL</span>
+            <span class="item-ext">.glsl</span>
+          </div>
+          <div class="dropdown-sep"></div>
+          <div class="dropdown-item" data-export="react">
+            <span class="item-icon"><iconify-icon icon="logos:react" width="16" height="16"></iconify-icon></span>
+            <span class="item-label">React</span>
+            <span class="item-ext">.jsx</span>
+          </div>
+          <div class="dropdown-item" data-export="svelte">
+            <span class="item-icon"><iconify-icon icon="logos:svelte-icon" width="16" height="16"></iconify-icon></span>
+            <span class="item-label">Svelte</span>
+            <span class="item-ext">.svelte</span>
+          </div>
+          <div class="dropdown-item" data-export="vanilla">
+            <span class="item-icon"><iconify-icon icon="logos:javascript" width="16" height="16"></iconify-icon></span>
+            <span class="item-label">Vanilla JS</span>
+            <span class="item-ext">.js</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main 3-column ──────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Left: Prompt + History -->
+    <aside id="left-panel">
+      <div id="left-resize-handle"></div>
+      <div class="panel-header" id="prompt-header">
+        Prompt
+        <button class="btn-add-param" id="new-session-btn" title="New — clear prompt and canvas" style="margin-left:auto">+</button>
+      </div>
+
+      <div id="left-scroll">
+
+        <div id="prompt-wrap">
+          <textarea
+            id="prompt-input"
+            placeholder="Describe a shader… e.g. "top-down city flyover with glowing grid lines" or "psychedelic Julia set fractal""
+            spellcheck="false"
+          ></textarea>
+          <!-- Image preview (hidden until image selected) -->
+          <div id="image-preview-wrap" style="display:none">
+            <div id="image-preview-inner">
+              <img id="image-preview-thumb" alt="Reference image" />
+              <button class="btn btn-ghost btn-icon" id="image-remove-btn" title="Remove image"><iconify-icon icon="mingcute:close-line" width="16" height="16"></iconify-icon></button>
+            </div>
+          </div>
+          <div class="generate-row">
+            <button class="btn btn-primary" id="generate-btn">Generate</button>
+            <button class="btn btn-secondary btn-icon" id="image-btn" title="Attach reference image"><iconify-icon icon="mingcute:attachment-2-line" width="18" height="18"></iconify-icon></button>
+            <input type="file" id="image-upload" accept="image/*" style="display:none" />
+            <button class="btn btn-secondary btn-icon" id="random-btn" title="Random prompt"><iconify-icon icon="mingcute:shuffle-2-line" width="18" height="18"></iconify-icon></button>
+            <button class="btn btn-secondary btn-icon" id="enhance-prompt-btn" title="Enhance prompt with AI"><iconify-icon icon="mingcute:sparkles-line" width="18" height="18"></iconify-icon></button>
+          </div>
+        </div>
+
+        <div id="stream-preview">
+          <div class="terminal-header">
+            <span class="terminal-filename">shader.glsl</span>
+            <span class="terminal-badge" id="terminal-badge">generating…</span>
+          </div>
+          <div class="terminal-body" id="stream-content"></div>
+        </div>
+
+        <div id="sweeteners-section">
+          <button class="panel-header collapsible-header" id="sweeteners-toggle">
+            Sweeteners
+            <span class="collapse-arrow" id="sweeteners-arrow"><iconify-icon icon="mingcute:right-line" width="14" height="14"></iconify-icon></span>
+          </button>
+          <div id="sweeteners-panel" hidden>
+            <div class="sweeteners-group-label">Technique</div>
+            <div class="sweeteners-pills" id="sweeteners-technique"></div>
+            <div class="sweeteners-group-label">Theme</div>
+            <div class="sweeteners-pills" id="sweeteners-theme"></div>
+            <div class="sweeteners-group-label">Color</div>
+            <div class="sweeteners-pills" id="sweeteners-color"></div>
+          </div>
+        </div>
+        <div id="description-section" hidden>
+          <button class="panel-header collapsible-header" id="description-toggle">
+            Description
+            <span class="collapse-arrow" id="description-arrow"><iconify-icon icon="mingcute:right-line" width="14" height="14"></iconify-icon></span>
+          </button>
+          <div id="explanation"></div>
+        </div>
+
+      </div>
+
+      <div id="history-section">
+        <button class="panel-header collapsible-header" id="history-toggle">
+          Saved <span id="history-count"></span>
+          <span class="collapse-arrow" id="history-arrow"><iconify-icon icon="mingcute:right-line" width="14" height="14"></iconify-icon></span>
+        </button>
+        <ul id="history-list"></ul>
+      </div>
+
+    </aside>
+
+    <!-- Center: Canvas -->
+    <div id="center-panel">
+      <div id="canvas-wrap">
+        <canvas id="shader-canvas"></canvas>
+      </div>
+      <div id="error-banner"></div>
+      <div id="canvas-controls">
+        <button class="btn btn-ghost" id="pause-btn"><iconify-icon icon="mingcute:pause-fill" width="16" height="16"></iconify-icon> Pause</button>
+        <button class="btn btn-ghost" id="reset-time-btn"><iconify-icon icon="mingcute:refresh-2-line" width="16" height="16"></iconify-icon> Reset Time</button>
+        <button class="btn btn-ghost" id="fullscreen-btn"><iconify-icon icon="mingcute:fullscreen-line" width="16" height="16"></iconify-icon> Fullscreen</button>
+        <div id="undo-redo-group">
+          <button class="btn btn-ghost btn-icon" id="undo-btn" title="Undo (⌘Z)" disabled><iconify-icon icon="mingcute:undo-line" width="18" height="18"></iconify-icon></button>
+          <button class="btn btn-ghost btn-icon" id="redo-btn" title="Redo (⌘⇧Z)" disabled><iconify-icon icon="mingcute:redo-line" width="18" height="18"></iconify-icon></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Parameters -->
+    <aside id="right-panel">
+      <div id="right-resize-handle"></div>
+      <div class="panel-header">
+        Parameters
+        <div class="param-add-wrap" id="param-add-wrap">
+          <button class="btn-add-param" id="param-edit-btn" title="Edit parameters"><iconify-icon icon="mingcute:pencil-line" width="14" height="14"></iconify-icon></button>
+          <button class="btn-add-param" id="param-save-btn" title="Save parameter state">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="3.5" y="1.5" width="3.5" height="2.5" stroke="currentColor" stroke-width="1.1"/><rect x="2.5" y="6" width="7" height="4" rx="0.5" stroke="currentColor" stroke-width="1.1"/></svg>
+          </button>
+          <button class="btn-add-param" id="param-add-btn" title="Add parameter">+</button>
+          <div class="param-add-dropdown" id="param-add-dropdown">
+            <div id="param-rows"></div>
+            <button class="param-add-row-btn" id="param-add-row-btn">+ Add row</button>
+            <button class="btn btn-primary btn-sm" id="param-add-submit">Add</button>
+          </div>
+        </div>
+      </div>
+      <div id="presets-bar" hidden>
+        <div id="presets-list"></div>
+        <button class="preset-add-btn" id="preset-capture-btn" title="Save current values as a preset"><iconify-icon icon="mingcute:add-line" width="12" height="12"></iconify-icon></button>
+      </div>
+      <div id="params-panel">
+        <div id="system-params"></div>
+        <div id="user-params">
+          <p class="no-params">Generate a shader to see<br>its parameters here.</p>
+        </div>
+      </div>
+      <div id="params-edit-bar" hidden>
+        <span id="params-edit-count">0 selected</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" id="params-edit-cancel">Cancel</button>
+          <button class="btn btn-sm" id="params-edit-delete" style="background:var(--red);color:#fff;border-color:var(--red)">Delete</button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ── Bottom: GLSL Editor ────────────────────────────────────────────── -->
+  <div id="bottom-panel">
+    <div id="editor-resize-handle"></div>
+    <div id="editor-header">
+      <div class="editor-mode-wrap">
+        <select id="editor-mode-select" class="editor-mode-select">
+          <option value="editor">GLSL Editor</option>
+          <option value="logs">Compiler Logs</option>
+        </select>
+        <span class="editor-mode-arrow">
+          <iconify-icon icon="mingcute:up-small-line" width="10" height="10"></iconify-icon>
+          <iconify-icon icon="mingcute:down-small-line" width="10" height="10"></iconify-icon>
+        </span>
+      </div>
+      <div class="editor-action-group">
+        <button class="btn btn-ghost btn-icon" id="compile-btn" title="Compile"><iconify-icon icon="mingcute:play-circle-line" width="16" height="16"></iconify-icon></button>
+        <button class="btn btn-ghost btn-icon" id="clear-logs-btn" title="Clear logs" hidden><iconify-icon icon="mingcute:delete-2-line" width="16" height="16"></iconify-icon></button>
+        <div class="enhance-shader-wrap" id="enhance-shader-wrap">
+          <button class="btn btn-ghost btn-icon" id="enhance-shader-btn" title="Enhance shader with AI"><iconify-icon icon="mingcute:ai-line" width="16" height="16"></iconify-icon></button>
+          <div class="enhance-shader-popover" id="enhance-shader-popover" hidden>
+            <input type="text" id="enhance-shader-input" placeholder="What to improve… (optional)" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-primary btn-sm" id="enhance-shader-submit">Enhance</button>
+          </div>
+        </div>
+        <div class="tooltip-anchor" id="adapt-btn-wrap">
+          <button class="btn btn-ghost btn-icon" id="adapt-btn" title="Adapt for App"><iconify-icon icon="mingcute:magic-2-line" width="16" height="16"></iconify-icon></button>
+          <div class="rich-tooltip" role="tooltip">
+            <div class="rt-title">Adapt for App</div>
+            <div class="rt-body">Rewrites the shader in the editor to meet this tool's WebGL2 conventions — without changing the visual output.</div>
+            <ul class="rt-list">
+              <li>Adds <code>#version 300 es</code> and <code>precision highp float;</code></li>
+              <li>Injects <code>u_time</code> and <code>u_resolution</code> uniforms</li>
+              <li>Replaces <code>gl_FragColor</code> → <code>fragColor</code>, <code>texture2D</code> → <code>texture</code></li>
+              <li>Converts <code>varying</code>/<code>attribute</code> to WebGL2 <code>in</code>/<code>out</code></li>
+              <li>Adds <code>// @param</code> annotations so uniforms become sliders</li>
+            </ul>
+            <div class="rt-tip">Useful when pasting shaders from Shadertoy or GLSL Sandbox.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="glsl-editor"></div>
+    <div id="compiler-logs" hidden>
+      <div id="log-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Settings Modal ──────────────────────────────────────────────────────── -->
+<div id="settings-modal" role="dialog" aria-modal="true">
+  <div class="settings-box">
+    <aside class="settings-sidebar">
+      <div class="settings-brand">Settings</div>
+      <nav class="settings-nav">
+        <button class="settings-tab settings-tab--active" data-tab="general">General</button>
+        <button class="settings-tab" data-tab="appearance">Appearance</button>
+      </nav>
+    </aside>
+    <div class="settings-main">
+      <button class="btn btn-ghost btn-icon settings-close" id="settings-close"><iconify-icon icon="mingcute:close-line" width="18" height="18"></iconify-icon></button>
+
+      <!-- General pane -->
+      <div class="settings-pane" id="settings-pane-general">
+        <h3 class="settings-pane-title">General</h3>
+
+        <div class="settings-section">
+          <div class="settings-section-label">Provider</div>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">AI Provider</span>
+              <span class="settings-row-desc">Service used for shader generation</span>
+            </div>
+            <select id="setting-provider" class="settings-select">
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Gemini</option>
+              <option value="local">Local (LM Studio / Ollama)</option>
+            </select>
+          </div>
+
+          <!-- API key row — cloud providers -->
+          <div class="settings-row settings-row--indent settings-row--enabled" id="settings-apikey-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">API Key</span>
+              <span class="settings-row-desc">Stored locally — never sent to our servers</span>
+            </div>
+            <div class="settings-api-key-wrap">
+              <input type="password" id="setting-api-key" class="settings-text-input" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+              <button class="btn btn-primary btn-sm" id="setting-api-key-save">Save</button>
+            </div>
+          </div>
+
+          <!-- Server URL — local provider -->
+          <div class="settings-row settings-row--indent settings-row--enabled" id="settings-local-url-row" style="display:none">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Server URL</span>
+              <span class="settings-row-desc">Base URL of your local inference server</span>
+            </div>
+            <div class="settings-api-key-wrap">
+              <input type="text" id="setting-local-url" class="settings-text-input" placeholder="http://localhost:1234/v1" autocomplete="off" spellcheck="false" />
+              <button class="btn btn-primary btn-sm" id="setting-local-url-save">Save</button>
+            </div>
+          </div>
+
+          <!-- Model name — local provider -->
+          <div class="settings-row settings-row--indent settings-row--enabled" id="settings-local-model-row" style="display:none">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Model name</span>
+              <span class="settings-row-desc">Identifier sent with requests (optional)</span>
+            </div>
+            <div class="settings-api-key-wrap">
+              <input type="text" id="setting-local-model" class="settings-text-input" placeholder="e.g. llama-3.1" autocomplete="off" spellcheck="false" />
+              <button class="btn btn-primary btn-sm" id="setting-local-model-save">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-label">Editor</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Auto-compile</span>
+              <span class="settings-row-desc">Recompile the shader automatically after you stop typing</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="setting-auto-compile" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="settings-row settings-row--indent" id="auto-compile-delay-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Compile delay</span>
+              <span class="settings-row-desc">Milliseconds of idle time before auto-compiling</span>
+            </div>
+            <div class="settings-inline-input">
+              <input type="range" id="setting-compile-delay" min="300" max="3000" step="100" value="800" />
+              <span class="settings-value-label" id="compile-delay-label">800 ms</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-label">Session</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Restore last session</span>
+              <span class="settings-row-desc">Re-open the previous shader and history when you return</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="setting-restore-session" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appearance pane -->
+      <div class="settings-pane settings-pane--hidden" id="settings-pane-appearance">
+        <h3 class="settings-pane-title">Appearance</h3>
+
+        <div class="settings-section">
+          <div class="settings-section-label">Accent color</div>
+          <div class="settings-row settings-row--col">
+            <div class="accent-presets" id="accent-presets">
+              <button class="accent-swatch" data-color="#7c3aed" style="background:#7c3aed" title="Purple (default)"></button>
+              <button class="accent-swatch" data-color="#2563eb" style="background:#2563eb" title="Blue"></button>
+              <button class="accent-swatch" data-color="#0891b2" style="background:#0891b2" title="Cyan"></button>
+              <button class="accent-swatch" data-color="#16a34a" style="background:#16a34a" title="Green"></button>
+              <button class="accent-swatch" data-color="#d97706" style="background:#d97706" title="Amber"></button>
+              <button class="accent-swatch" data-color="#db2777" style="background:#db2777" title="Pink"></button>
+              <button class="accent-swatch" data-color="#dc2626" style="background:#dc2626" title="Red"></button>
+            </div>
+            <div class="accent-custom-row">
+              <span class="settings-row-label">Custom</span>
+              <input type="color" id="setting-accent-color" value="#7c3aed" class="accent-color-input" />
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-label">Editor</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Font size</span>
+              <span class="settings-row-desc">Font size used in the GLSL editor</span>
+            </div>
+            <div class="settings-inline-input">
+              <input type="range" id="setting-font-size" min="10" max="20" step="1" value="12" />
+              <span class="settings-value-label" id="font-size-label">12 px</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Export Modal ────────────────────────────────────────────────────────── -->
+<div id="export-modal" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-title">Export</h2>
+      <button class="btn btn-ghost" id="modal-copy">Copy</button>
+      <button class="btn btn-ghost" id="modal-close"><iconify-icon icon="mingcute:close-line" width="18" height="18"></iconify-icon></button>
+    </div>
+    <div class="modal-body">
+      <pre><code id="modal-code"></code></pre>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-glsl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+
+<!-- Monaco Editor -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+<script>
+  (function () {
+    const savedTheme = localStorage.getItem('shader-theme') || 'dark';
+    if (savedTheme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+
+    // Restore accent color immediately to avoid flash
+    (function () {
+      const accent = localStorage.getItem('shader-accent');
+      if (accent && /^#[0-9a-f]{6}$/i.test(accent) && accent !== '#7c3aed') {
+        document.documentElement.style.setProperty('--accent', accent);
+      }
+    })();
+
+    // Restore panel sizes before Monaco creates the editor so it measures the right height
+    (function () {
+      const lw = localStorage.getItem('shader-left-w');
+      const rw = localStorage.getItem('shader-right-w');
+      const eh = localStorage.getItem('shader-editor-h');
+      const root = document.documentElement;
+      if (lw) root.style.setProperty('--left-w', lw + 'px');
+      if (rw) root.style.setProperty('--right-w', rw + 'px');
+      if (eh) root.style.setProperty('--editor-h', eh + 'px');
+    })();
+
+    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
+
+    window._monacoReady = new Promise(function (resolve) {
+      require(['vs/editor/editor.main'], function () {
+        monaco.languages.register({ id: 'glsl' });
+        monaco.languages.setMonarchTokensProvider('glsl', {
+          keywords: ['if', 'else', 'for', 'while', 'do', 'break', 'continue', 'return', 'discard',
+            'struct', 'in', 'out', 'inout', 'uniform', 'varying', 'attribute', 'const',
+            'precision', 'highp', 'mediump', 'lowp', 'layout', 'location', 'version'],
+          types: ['void', 'bool', 'int', 'uint', 'float', 'double',
+            'vec2', 'vec3', 'vec4', 'bvec2', 'bvec3', 'bvec4',
+            'ivec2', 'ivec3', 'ivec4', 'uvec2', 'uvec3', 'uvec4',
+            'mat2', 'mat3', 'mat4', 'mat2x2', 'mat2x3', 'mat2x4',
+            'mat3x2', 'mat3x3', 'mat3x4', 'mat4x2', 'mat4x3', 'mat4x4',
+            'sampler2D', 'sampler3D', 'samplerCube', 'sampler2DArray',
+            'isampler2D', 'usampler2D'],
+          builtins: ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh',
+            'pow', 'exp', 'log', 'exp2', 'log2', 'sqrt', 'inversesqrt',
+            'abs', 'sign', 'floor', 'trunc', 'round', 'roundEven', 'ceil', 'fract',
+            'mod', 'modf', 'min', 'max', 'clamp', 'mix', 'step', 'smoothstep',
+            'isnan', 'isinf', 'floatBitsToInt', 'floatBitsToUint', 'intBitsToFloat',
+            'length', 'distance', 'dot', 'cross', 'normalize', 'reflect', 'refract',
+            'faceforward', 'matrixCompMult', 'outerProduct', 'transpose', 'determinant', 'inverse',
+            'texture', 'textureSize', 'texelFetch', 'texture2D', 'textureCube',
+            'dFdx', 'dFdy', 'fwidth',
+            'gl_FragCoord', 'gl_FrontFacing', 'gl_PointCoord',
+            'gl_Position', 'gl_PointSize', 'gl_VertexID', 'gl_InstanceID',
+            'fragColor', 'main'],
+          tokenizer: {
+            root: [
+              [/#version\b.*$/, 'keyword.control'],
+              [/#\w+/, 'keyword.control'],
+              [/[a-zA-Z_]\w*/, {
+                cases: {
+                  '@keywords': 'keyword',
+                  '@types': 'type.identifier',
+                  '@builtins': 'support.function',
+                  '@default': 'identifier'
+                }
+              }],
+              [/\/\/.*$/, 'comment'],
+              [/\/\*/, { token: 'comment', next: '@blockComment' }],
+              [/\d+\.\d*([eE][+-]?\d+)?[fF]?/, 'number.float'],
+              [/\.\d+([eE][+-]?\d+)?[fF]?/, 'number.float'],
+              [/\d+[eE][+-]?\d+[fF]?/, 'number.float'],
+              [/0[xX][0-9a-fA-F]+[uU]?/, 'number.hex'],
+              [/\d+[uU]?/, 'number'],
+              [/[;,.{}()\[\]]/, 'delimiter'],
+              [/[+\-*\/%&|^!~<>=?:]/, 'operator'],
+              [/\s+/, 'white'],
+            ],
+            blockComment: [
+              [/[^/*]+/, 'comment'],
+              [/\*\//, { token: 'comment', next: '@pop' }],
+              [/[/*]/, 'comment'],
+            ]
+          }
+        });
+
+        monaco.languages.setLanguageConfiguration('glsl', {
+          comments: { lineComment: '//', blockComment: ['/*', '*/'] },
+          brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+          autoClosingPairs: [
+            { open: '{', close: '}' }, { open: '[', close: ']' },
+            { open: '(', close: ')' }
+          ]
+        });
+
+        const isDark = (localStorage.getItem('shader-theme') || 'dark') === 'dark';
+        const ed = monaco.editor.create(document.getElementById('glsl-editor'), {
+          value: '// Your GLSL shader will appear here after generation.\n// You can also write or paste a shader directly and click Compile.',
+          language: 'glsl',
+          theme: isDark ? 'vs-dark' : 'vs',
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          fontSize: 12,
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+          lineNumbers: 'on',
+          wordWrap: 'off',
+          automaticLayout: false,
+          tabSize: 2,
+          insertSpaces: true,
+          renderLineHighlight: 'line',
+          occurrencesHighlight: 'off',
+          selectionHighlight: false,
+          overviewRulerLanes: 0,
+          hideCursorInOverviewRuler: true,
+          scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
+        });
+
+        resolve(ed);
+      });
+    });
+  })();
+</script>
+
+<script type="module" src="/js/app.js"></script>
+<script data-name="BMC-Widget" data-cfasync="false" src="https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js" data-id="JoeContumelio" data-description="Support me on Buy me a coffee!" data-message="" data-color="#26B0A1" data-position="Right" data-x_margin="18" data-y_margin="18"></script>
+</body>
+</html>

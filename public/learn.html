@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Learn GLSL — Shader Tool</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/learn.css" />
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+</head>
+<body>
+<div id="app" class="learn-app">
+
+  <header id="topbar">
+    <div id="logo">Shader<span>Tool</span></div>
+    <nav class="topbar-nav">
+      <a class="nav-link" href="/app">Editor</a>
+      <a class="nav-link nav-link--active" href="/learn">Learn</a>
+    </nav>
+    <div id="status-bar"></div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-icon" id="theme-toggle" title="Toggle light/dark mode"><iconify-icon icon="mingcute:moon-line" width="18" height="18"></iconify-icon></button>
+    </div>
+  </header>
+
+  <div id="learn-layout">
+    <aside id="learn-sidebar">
+      <div class="sidebar-label">Sections</div>
+      <nav id="toc"></nav>
+    </aside>
+    <main id="learn-main">
+      <div id="learn-intro">
+        <h1>GLSL Fundamentals</h1>
+        <p>Fragment shaders run once per pixel, every frame. Each invocation receives the pixel's position and outputs a color. Everything on screen — shapes, animations, textures, fractals — is just math that maps a coordinate to a color. This guide walks through that math interactively. Edit any example live and see the result immediately.</p>
+      </div>
+      <div id="sections-container"></div>
+    </main>
+  </div>
+
+</div>
+<script>
+  (function () {
+    var t = localStorage.getItem('shader-theme') || 'dark';
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    var a = localStorage.getItem('shader-accent');
+    if (a && /^#[0-9a-f]{6}$/i.test(a)) document.documentElement.style.setProperty('--accent', a);
+  })();
+</script>
+<script type="module" src="/js/learn.js"></script>
+</body>
+</html>
