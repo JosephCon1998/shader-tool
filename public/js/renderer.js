@@ -22,7 +22,7 @@ void main() {
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
-    this.gl = canvas.getContext('webgl2');
+    this.gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
     if (!this.gl) throw new Error('WebGL2 not supported');
 
     this.program = null;

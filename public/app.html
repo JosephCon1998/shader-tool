@@ -77,11 +77,15 @@
       <div id="left-scroll">
 
         <div id="prompt-wrap">
-          <textarea
-            id="prompt-input"
-            placeholder="Describe a shader… e.g. "top-down city flyover with glowing grid lines" or "psychedelic Julia set fractal""
-            spellcheck="false"
-          ></textarea>
+          <div id="prompt-input-wrap">
+            <textarea
+              id="prompt-input"
+              placeholder="Describe a shader… e.g. "top-down city flyover with glowing grid lines" or "psychedelic Julia set fractal""
+              spellcheck="false"
+              maxlength="10000"
+            ></textarea>
+            <div id="prompt-char-count">10,000 characters remaining</div>
+          </div>
           <!-- Image preview (hidden until image selected) -->
           <div id="image-preview-wrap" style="display:none">
             <div id="image-preview-inner">
@@ -258,6 +262,12 @@
               <span class="item-icon"><iconify-icon icon="logos:javascript" width="16" height="16"></iconify-icon></span>
               <span class="item-label">Vanilla JS</span>
               <span class="item-ext">.js</span>
+            </div>
+            <div class="dropdown-sep"></div>
+            <div class="dropdown-item" data-export="png">
+              <span class="item-icon"><iconify-icon icon="mingcute:pic-line" width="16" height="16"></iconify-icon></span>
+              <span class="item-label">PNG Snapshot</span>
+              <span class="item-ext">.png</span>
             </div>
           </div>
         </div>

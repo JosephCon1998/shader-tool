@@ -83,6 +83,7 @@ function showSaveIndicator() {
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const canvas          = document.getElementById('shader-canvas');
 const promptInput     = document.getElementById('prompt-input');
+const promptCharCount = document.getElementById('prompt-char-count');
 
 {
   const placeholders = [
@@ -93,6 +94,18 @@ const promptInput     = document.getElementById('prompt-input');
   ];
   promptInput.placeholder = placeholders[Math.floor(Math.random() * placeholders.length)];
 }
+
+{
+  const LIMIT = 10_000;
+  function updateCharCount() {
+    const remaining = LIMIT - promptInput.value.length;
+    promptCharCount.textContent = remaining.toLocaleString() + ' characters remaining';
+    promptCharCount.classList.toggle('near-limit', remaining <= 500 && remaining > 0);
+    promptCharCount.classList.toggle('at-limit', remaining <= 0);
+  }
+  promptInput.addEventListener('input', updateCharCount);
+}
+
 const generateBtn     = document.getElementById('generate-btn');
 const randomBtn       = document.getElementById('random-btn');
 const pauseBtn        = document.getElementById('pause-btn');
@@ -1823,7 +1836,21 @@ document.querySelectorAll('[data-export]').forEach(item => {
   });
 });
 
+function exportPNG() {
+  if (!currentShader) {
+    showError('Generate a shader first before exporting.');
+    return;
+  }
+  const url = canvas.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'shader.png';
+  a.click();
+}
+
 function openExportModal(format) {
+  if (format === 'png') { exportPNG(); return; }
+
   if (!currentShader) {
     showError('Generate a shader first before exporting.');
     return;
