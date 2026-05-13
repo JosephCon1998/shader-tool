@@ -1,4 +1,4 @@
-<img src="./readme-header-img.png" width="175px" height="80px" />
+<img src="./assets/app-screenshot.png" height="300px" />
 
 <br>
 
