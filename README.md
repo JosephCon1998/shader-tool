@@ -1,21 +1,35 @@
+<img src="./readme-header-img.png" width="175px" height="80px" />
+
+<br>
+
 # shader-tool
 
-An AI-powered GLSL fragment shader editor with real-time WebGL2 preview, interactive parameter controls, and one-click export to React, Svelte, Vanilla JS, or raw GLSL.
+An AI-powered GLSL fragment shader editor with real-time WebGL2 preview,
+interactive parameter controls, and one-click export to React, Svelte, Vanilla
+JS, or raw GLSL.
 
 ---
 
 ## Features
 
-- **AI shader generation** — describe a shader in plain English; streaming output appears in real time
-- **Multiple AI providers** — Anthropic, OpenAI, Gemini, or any OpenAI-compatible local model (LM Studio, Ollama)
+- **AI shader generation** — describe a shader in plain English; streaming
+  output appears in real time
+- **Multiple AI providers** — Anthropic, OpenAI, Gemini, or any
+  OpenAI-compatible local model (LM Studio, Ollama)
 - **Real-time WebGL2 preview** — shader compiles and runs as code arrives
-- **Auto-fix** — broken shaders are automatically sent back to the AI for correction
-- **Interactive parameter controls** — sliders, color pickers, toggles, and vector controls driven by `@param` annotations in the shader source
-- **Parameter animation** — per-parameter play button oscillates values automatically
-- **Prompt sweeteners** — one-click technique, theme, and color phrase suggestions
-- **Prompt enhancement** — AI rewrites your prompt into a more vivid, detailed description
+- **Auto-fix** — broken shaders are automatically sent back to the AI for
+  correction
+- **Interactive parameter controls** — sliders, color pickers, toggles, and
+  vector controls driven by `@param` annotations in the shader source
+- **Parameter animation** — per-parameter play button oscillates values
+  automatically
+- **Prompt sweeteners** — one-click technique, theme, and color phrase
+  suggestions
+- **Prompt enhancement** — AI rewrites your prompt into a more vivid, detailed
+  description
 - **Monaco editor** — full syntax-highlighted GLSL editing with auto-compile
-- **History** — up to 20 shaders saved across sessions, with search, tags, and rename
+- **History** — up to 20 shaders saved across sessions, with search, tags, and
+  rename
 - **Presets** — capture and switch between named parameter configurations
 - **Undo / redo** — 50-step state stack (Cmd/Ctrl+Z)
 - **Export** — GLSL · Vanilla JS · React · Svelte
@@ -44,14 +58,15 @@ For production: `npm start`.
 
 ## Providers
 
-| Provider | Key in `.env` / Settings UI | Notes |
-|----------|----------------------------|-------|
-| **Anthropic** (default) | `ANTHROPIC_API_KEY` | Claude models; supports extended thinking |
-| **OpenAI** | Set in Settings UI | GPT-4o and newer models |
-| **Google Gemini** | Set in Settings UI | Gemini 2.x models |
-| **Local** | Set base URL + model name in Settings | LM Studio, Ollama, any OpenAI-compatible server |
+| Provider                | Key in `.env` / Settings UI           | Notes                                           |
+| ----------------------- | ------------------------------------- | ----------------------------------------------- |
+| **Anthropic** (default) | `ANTHROPIC_API_KEY`                   | Claude models; supports extended thinking       |
+| **OpenAI**              | Set in Settings UI                    | GPT-4o and newer models                         |
+| **Google Gemini**       | Set in Settings UI                    | Gemini 2.x models                               |
+| **Local**               | Set base URL + model name in Settings | LM Studio, Ollama, any OpenAI-compatible server |
 
-Only `ANTHROPIC_API_KEY` is read from `.env`. All other keys are entered in the Settings panel and stored in `localStorage`.
+Only `ANTHROPIC_API_KEY` is read from `.env`. All other keys are entered in the
+Settings panel and stored in `localStorage`.
 
 ---
 
@@ -79,7 +94,8 @@ uniform vec3  u_color;  // @param label:"Color" default:[1.0, 0.4, 0.1]
 uniform bool  u_glow;   // @param label:"Glow" default:true
 ```
 
-The `u_` prefix is stripped when generating control labels and export prop names.
+The `u_` prefix is stripped when generating control labels and export prop
+names.
 
 ---
 
@@ -105,20 +121,21 @@ public/
 
 ## Export Targets
 
-| Format | What you get |
-|--------|-------------|
-| **GLSL** | Raw shader source |
-| **Vanilla JS** | Self-contained `createShader()` function with WebGL2 setup |
-| **React** | Functional component with `useRef` / `useEffect`; props for each uniform |
-| **Svelte** | Svelte 5 component using runes (`$state`, `$props`, `$bindable`) |
+| Format         | What you get                                                             |
+| -------------- | ------------------------------------------------------------------------ |
+| **GLSL**       | Raw shader source                                                        |
+| **Vanilla JS** | Self-contained `createShader()` function with WebGL2 setup               |
+| **React**      | Functional component with `useRef` / `useEffect`; props for each uniform |
+| **Svelte**     | Svelte 5 component using runes (`$state`, `$props`, `$bindable`)         |
 
-All exports include uniform binding, device pixel ratio handling, and proper cleanup.
+All exports include uniform binding, device pixel ratio handling, and proper
+cleanup.
 
 ---
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | — | Required when using Anthropic as the provider |
-| `PORT` | `2000` | HTTP port the server listens on |
+| Variable            | Default | Description                                   |
+| ------------------- | ------- | --------------------------------------------- |
+| `ANTHROPIC_API_KEY` | —       | Required when using Anthropic as the provider |
+| `PORT`              | `2000`  | HTTP port the server listens on               |
