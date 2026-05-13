@@ -1,7 +1,5 @@
 <img src="./assets/app-screenshot.png" height="300px" />
 
-<br>
-
 # shader-tool
 
 An AI-powered GLSL fragment shader editor with real-time WebGL2 preview,
