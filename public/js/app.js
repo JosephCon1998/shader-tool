@@ -154,6 +154,7 @@ const editorResizeHandle = document.getElementById('editor-resize-handle');
 const rightResizeHandle  = document.getElementById('right-resize-handle');
 const leftResizeHandle   = document.getElementById('left-resize-handle');
 const newSessionBtn      = document.getElementById('new-session-btn');
+const paramCopyBtn       = document.getElementById('param-copy-btn');
 const paramEditBtn       = document.getElementById('param-edit-btn');
 const paramSaveBtn       = document.getElementById('param-save-btn');
 const manualSaveBtn      = document.getElementById('manual-save-btn');
@@ -1533,6 +1534,19 @@ controls.rebuild = (...args) => {
   _rebuildOrig(...args);
 };
 
+paramCopyBtn.addEventListener('click', () => {
+  const values = controls.getValues();
+  navigator.clipboard.writeText(JSON.stringify(values, null, 2)).then(() => {
+    const icon = paramCopyBtn.querySelector('iconify-icon');
+    icon.setAttribute('icon', 'mingcute:check-line');
+    paramCopyBtn.style.color = 'var(--green)';
+    setTimeout(() => {
+      icon.setAttribute('icon', 'mingcute:copy-2-line');
+      paramCopyBtn.style.color = '';
+    }, 1500);
+  });
+});
+
 paramEditBtn.addEventListener('click', () => {
   if (paramsEditMode) exitParamsEditMode();
   else enterParamsEditMode();
@@ -1896,7 +1910,10 @@ modalCopy.addEventListener('click', () => {
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function setStatus(msg) { statusBar.textContent = msg; }
+function setStatus(msg) {
+  statusBar.textContent = msg;
+  statusBar.classList.toggle('loading', msg.endsWith('…'));
+}
 
 function showError(msg, fixable = false) {
   errorBanner.innerHTML = '';
